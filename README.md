@@ -12,6 +12,23 @@ The SDK supports API level 21 and above.
 Apps need to use a single NDK and STL for all native code and dependencies - [one STL per app](https://developer.android.com/ndk/guides/cpp-support#one_stl_per_app).
 We use NDK 21.3.6528147 and STL c++_shared by default. If you already rely on an another native library, please do mutual compatibility check as soon as possible.
 
+### Migration
+
+#### 1.21.0 -> 1.22.0
+- Copy and paste libraries
+- Remove method setVideoSettings. Local change of video settings is no longer supported. You can set video settings on backend side.
+
+#### 1.20.0 -> 1.21.0
+- Copy and paste libraries
+
+#### 1.19.0 -> 1.20.0
+- Copy and paste libraries
+- Set targetSdkVersion 31 at least
+- Send ZENID signature as a multipart request [here](https://github.com/ZenIDTeam/ZenID-android-sample#sdk-signature)
+- Implement profile feature [here](https://github.com/ZenIDTeam/ZenID-android-sample#select-profile)
+- Implement new states for DocumentPicture and FaceLiveness
+- Remove readBarcode, specularAcceptableScore, documentBlurAcceptableScore fields from DocumentPictureSettings. These values are set on backend side.
+
 ### Package sizes
 
 |  Package name  |  Size (MB)  |  Note  |
@@ -182,7 +199,14 @@ apiService.getInitSdk(challengeToken).enqueue(new Callback<InitResponseJson>() {
 });
 ```
 
-If you want to speed up authorization process during development, just ask us. We can provide offline response tokens to you. But only for development purposes. Leak into production would undermine security!
+### Select profile
+
+This allows customers to set frontend validator configs on the backend. On Init() call the SDK receives a list of profiles and their respective configs. 
+Calling SelectProfile() sets what profile will be used for subsequent verifier usage.
+```
+ZenId.get().getSecurity().selectProfile("profile-name");
+```
+You must set explicitly profile when investigation samples over `ApiService.getInvestigateSamples()`.
 
 ### Architectural overview of the SDK
 
@@ -314,6 +338,7 @@ FaceLivenessState:
 - BLURRY = The picture is too blurry.
 - DARK = The picture is dark.
 - HOLD_STILL = Hold still.
+- RESETING = Face is not verified, please try again. Move to better light conditions. Minimize sudden movements.
 
 ### Document picture feature
 
@@ -336,20 +361,8 @@ Boolean enableAimingCircle;
 // Toggles displaying timer that shows seconds remaining for the validators to become max tolerant.
 Boolean showTimer;
 
-// Can be used for fine tuning the sensitivity of the specular validator. Value range 0-100. Default value is 50.
-Integer specularAcceptableScore;
-
-// Can be used for fine tuning the sensitivity of the document blur validator. Value range 0-100. Default value is 50.
-Integer documentBlurAcceptableScore;
-
-// The time delay for the blur validator to become max tolerant. Default value is 10.
-Integer timeToBlurMaxToleranceInSeconds;
-
 // The card outline will be drawn on the video preview if this is true. Default: true
 Boolean drawOutline;
-
-// Setting it to false can be used to disable the barcode check. Default: false
-Boolean readBarcode;
 ```
 
 #### Document acceptable input 
@@ -365,6 +378,85 @@ DocumentAcceptableInput documentAcceptableInput = new DocumentAcceptableInput(Ar
 documentPictureView.setDocumentAcceptableInput(documentAcceptableInput);
 ```
 
+#### NFC
+
+It is up to you to use this package. Optional. First of all, you need to set targetSdkVersion 31 at least.
+When you decide to use this package, please add these dependencies.
+```
+implementation 'net.sf.scuba:scuba-sc-android:0.0.20'
+implementation 'org.jmrtd:jmrtd:0.7.17'
+implementation 'com.gemalto.jp2:jp2-android:1.0.3'
+```
+
+Method `DocumentPictureView.onPictureTaken()` can be implemented like this. Based on NfcStatus you must decide what to do.
+```
+public void onPictureTaken(DocumentPictureResult result, NfcStatus nfcStatus) {
+    if (NfcStatus.NFC_REQUIRED.equals(nfcStatus)) {
+        startActivity(new Intent(getApplicationContext(), NfcActivity.class));
+    } else {
+        postDocumentPictureSample(result);
+    }
+    finish();
+}
+```
+
+```
+public enum NfcStatus {
+
+    DEVICE_DOES_NOT_SUPPORT_NFC, // Device does not have NFC reader.
+    SAMPLE_WITHOUT_CHIP, // Sample does not have NFC tag.
+    NFC_VALIDATOR_DISABLED, // NFC validator is disabled on backend side.
+    NFC_REQUIRED; // You must proceed with NFC check.
+}
+```
+
+DON'T upload samples on backend when NFC step is required. Implement NfcActivity instead and let's do NFC check first. 
+Please check the sample codebase. 
+
+Our SDK provides `NfcService` class to wrap interaction with NFC tag
+
+```
+public interface NfcService.Callback {
+
+    // DocumentPictureState must be NFC otherwice NfcService will not work properly.
+    void onZenIdNotNfcState();  
+
+    void onStateChanged(NfcState nfcState); 
+
+    // DocumentPictureState is OK, result is signed and can be send to backend.
+    void onResult(DocumentPictureResult documentPictureResult, NfcResult nfcResult, NfcData nfcData);
+
+    // For instance when MRZ data are not correct and authentication is failing.
+    void onAccessDenied(NfcAccessDeniedException accessDeniedException);
+
+    // For instance when use more with his phone to far away.
+    void onConnectionFailed(NfcConnectionException connectionException);
+
+    void onGeneralException(Exception exception);
+}
+```
+
+```
+public enum NfcState {
+    START, // Connection established.
+    PERSONAL_DATA, // Reading personal data.
+    PHOTO, // Reading photo
+    OK; // All data retrieved
+}
+```
+
+Display photo from NFC. Unfortunately some documents use JPEG2000 image format. If you need to display photo from NFC, please, use this snippet.
+
+```
+String picturePath = nfcResult.getFacePicturePath();
+FacePictureFormat format = nfcResult.getFacePictureFormat();
+Bitmap bitmap;
+if (format.equals(FacePictureFormat.JP2)) {
+    bitmap = new JP2Decoder(picturePath).decode();
+} else {
+    bitmap = BitmapFactory.decodeFile(picturePath);
+}
+```
 ### Hologram feature
 
 #### Hologram settings
@@ -459,7 +551,7 @@ The object has the following properties:
 
 |  Property  |  Description  |
 |----------|-------------|
-|  name  |  Name of the step. It can be "CenteredCheck", "AngleCheck Left", "AngleCheck Right", "AngleCheck Up", "AngleCheck Down", "LegacyAngleCheck", or "SmileCheck". CenteredCheck requires the user to look at the camera. The AngleCheck steps require the user to turn their head in a specific direction. The LegacyAngleCheck requires the user to turn his head in any direction. It's only used when legacy mode is enabled. SmileCheck requires the user to smile.  |
+|  name  |  Name of the step. It can be "CenteredCheck", "AngleCheck Left", "AngleCheck Right", "AngleCheck Up", "AngleCheck Down", "LegacyAngleCheck", "UpPerspectiveCheck" or "SmileCheck". CenteredCheck requires the user to look at the camera. The AngleCheck steps require the user to turn their head in a specific direction. The LegacyAngleCheck requires the user to turn his head in any direction. It's only used when legacy mode is enabled. SmileCheck requires the user to smile, UpPerspective requires turn up and sometimes also turn down or repeat movement.  |
 |  totalCheckCount  |  The total number of the checks the user has to pass, including the ones that were already passed.  |
 |  passedCheckCount  |  The number of checks the user has passed.  |
 |  hasFailed  |  Flag that is true if the user has failed the most recent check. After the failed check, a few seconds pass and the check process is restarted - the flag is set to false and passedCheckCount goes back to 0.  |
@@ -518,19 +610,7 @@ documentPictureView.enableDefaultVisualization(visualizationSettings);
 
 ### Video settings
 
-```
-VideoSettings videoSettings = new VideoSettings.Builder()
-        .useVideoParamsFromBackend(true) // This will override other video settings
-        .videoFrameRate()
-        .videoMaxHeight()
-        .videoMaxWidth()
-        .videoFrameRateExact() // If set this option to true, it will give as exact preview fps as you want, but the sensor will have less freedom when adapting the exposure to the environment, which may lead to dark preview.
-        .build();
-
-faceLivenessView.setVideoSettings(videoSettings);
-```
-
-Please note that `videoFrameRate` parameter also set the frame rate for the video preview. Double check the value to ensure good user experience.
+You can set video settings on backend side.
 
 ### Preview stream size selection
 
@@ -550,6 +630,45 @@ The SDK now generates a signature for the snapshots it takes. The backend uses t
 The SDK returns signature within `DocumentPictureResult / SelfieResult / FaceLivenessResult` objects. Manual snapshots don't have signatures since they bypass SDK checks. 
     
 You can then send the signature to the backend with the /api/sample request.     
+
+Signatures now contain "--ZENID_SIGNATURE--" prefix. The new recommended way of sending `signature` is by adding it as a second file to multipart upload of sample (first file being the image or video itself). Alternative method, if you are uploading image/file as binary body in POST request is to append signature to binary data of image/video as is. Old way of sending signature as request parameter in URL still works, but you can encounter issues due to URL size limits so it is recommended to switch to the new method.
+
+Example using `okhttp3` and `retrofit2` libraries:
+
+```
+public interface RetrofitService {
+
+    @Multipart
+    @POST("sample")
+    Call<SampleJson> postSample(
+            @Part MultipartBody.Part picture,
+            @Part MultipartBody.Part signature,
+            @Query("expectedSampleType") String expectedSampleType,
+            ...
+    );
+}    
+```
+
+```
+private MultipartBody.Part buildJpegPart(@NonNull String picturePath) {
+    File file = new File(picturePath);
+    RequestBody requestBody = RequestBody.create(MediaType.parse("image/jpeg"), file);
+    MultipartBody.Part formData = MultipartBody.Part.createFormData("picture", "my picture", requestBody);
+    return formData;
+}
+
+private MultipartBody.Part buildSignaturePart(@NonNull String signature) {
+    RequestBody requestBody = RequestBody.create(MediaType.parse("text/plain"), signature.getBytes());
+    MultipartBody.Part formData = MultipartBody.Part.createFormData("signature", "my signature", requestBody);
+    return formData;
+}
+
+public Call<SampleJson> postDocumentPictureSample(@NonNull DocumentPictureResult result) {
+    MultipartBody.Part jpegPart = buildJpegPart(result.getFilePath());
+    MultipartBody.Part signaturePart = buildSignaturePart(result.getSignature());
+    return retrofitService.postSample(jpegPart, signaturePart, "DocumentPicture", ...);
+}
+```
 
 ### More details on the sdk-api-zenid module
 

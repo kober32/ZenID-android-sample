@@ -1,5 +1,28 @@
 # Changelog
 
+### 1.22.0 (2023-10-30) (RecogLibC v3.9.6)
+- Remove method `setVideoSettings`. These values are set on backend side.
+
+### 1.21.0 (2023-09-27) (RecogLibC v3.8.4)
+- New: Support for Dominican ID cards v2014.
+- Improvement: Dominican ID card MRZ reading.
+
+### 1.20.0 (2023-08-30) (RecogLibC v3.8.1)
+- New `sdk-nfc` package. 
+- Set targetSdkVersion 31 at least.
+- Method `getInvestigateSamples` requires you to set profile.
+- Remove readBarcode, specularAcceptableScore, documentBlurAcceptableScore fields from DocumentPictureSettings. These values are set on backend side.
+
+### 1.20.0-beta (2023-08-09) (RecogLibC v3.7.15)
+- Method `DocumentPictureView.Callback::onPictureTaken()` has got `boolean nfcRequired` argument for future usage. 
+- Face liveness improvements.
+- New SelectProfile feature that allows customers to set frontend validator configs on the backend.
+- New states for DocumentPicture and FaceLiveness.
+
+### 1.19.0 (2023-06-13) (RecogLibC v3.7.0)
+- Improvement: Hologram video length reducing. Start recording video when a card is detected. 
+- Improvement: `HologramView.Callback` has got `onVideoRecordingStart` method to notify you when video recording has started.
+
 ### 1.18.1 (2023-05-10) (RecogLibC v3.5.2)
 - Fix parsing BirthNumberChecksum value from MRZ
 
